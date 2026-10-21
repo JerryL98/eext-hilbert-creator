@@ -42,12 +42,13 @@
 
 			<div class="form-item">
 				<label for="copper">铜厚（oz）：</label>
-				<select id="copper" name="copper">
-					<option value="12">1/3 oz（12 μm）</option>
-					<option value="18">1/2 oz（18 μm）</option>
-					<option value="35" selected>1 oz（35 μm）</option>
-					<option value="70">2 oz（70 μm）</option>
-				</select>
+				<input type="text" inputmode="decimal" id="copper" name="copper" value="1" list="copper-presets" />
+				<datalist id="copper-presets">
+					<option value="0.5"></option>
+					<option value="1"></option>
+					<option value="1.5"></option>
+					<option value="2"></option>
+				</datalist>
 			</div>
 
 			<div class="form-item">
@@ -97,8 +98,12 @@
 			</div>
 
 			<div class="form-item">
-				<label for="viaDiameter" title="过孔外径 / 孔径">过孔 外径/孔径：</label>
+				<label for="viaDiameter">过孔外径（mm）：</label>
 				<input type="number" id="viaDiameter" name="viaDiameter" value="0.6" min="0.1" step="0.05" />
+			</div>
+
+			<div class="form-item">
+				<label for="viaHole">过孔孔径（mm）：</label>
 				<input type="number" id="viaHole" name="viaHole" value="0.3" min="0.05" step="0.05" />
 			</div>
 
@@ -137,10 +142,12 @@
 					const plan = planCurve(options);
 					const grid = plan.grid;
 					const lengthMm = eda.sys_Unit.milToMm(plan.lengthMil);
-					const copper = Number(options.copper) || 35;
+					const copperOz = Number(options.copper);
+					const copperUm = copperOz > 0 ? copperOz * 35 : 0;
 					const temp = Number(options.temp) || 20;
-					const r20 = copperResistance(lengthMm, Number(options.lineWidth), copper, 20);
-					const rTemp = copperResistance(lengthMm, Number(options.lineWidth), copper, temp);
+					const r20 = copperUm > 0 ? copperResistance(lengthMm, Number(options.lineWidth), copperUm, 20) : NaN;
+					const rTemp = copperUm > 0 ? copperResistance(lengthMm, Number(options.lineWidth), copperUm, temp) : NaN;
+					const r20Text = isFinite(r20) ? r20.toFixed(3) + ' Ω' : '铜厚无效';
 
 					let html =
 						'步距 ' +
@@ -156,10 +163,9 @@
 						' mm<br />线长 ' +
 						lengthMm.toFixed(1) +
 						' mm ｜ R@20℃ ' +
-						r20.toFixed(3) +
-						' Ω';
+						r20Text;
 					if (temp !== 20) {
-						html += ' ｜ R@' + temp + '℃ ' + rTemp.toFixed(3) + ' Ω';
+						html += ' ｜ R@' + temp + '℃ ' + (isFinite(rTemp) ? rTemp.toFixed(3) + ' Ω' : '—');
 					}
 					if (Number(options.gap) <= 0) {
 						html += '<br />⚠ 间距为 0，相邻走线会贴在一起（短路）';
@@ -178,7 +184,7 @@
 
 			['lineWidth', 'gap', 'width', 'height', 'copper', 'temp', 'mode', 'layers', 'lead', 'viaDiameter', 'viaHole', 'offset', 'via'].forEach(function (id) {
 				const element = document.getElementById(id);
-				element.addEventListener(id === 'mode' || id === 'layers' || id === 'copper' ? 'change' : 'input', updateInfo);
+				element.addEventListener(id === 'mode' || id === 'layers' ? 'change' : 'input', updateInfo);
 			});
 			updateInfo();
 

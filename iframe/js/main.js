@@ -257,7 +257,8 @@ async function calcResistance(options) {
 	const lengthMil = await eda.pcb_Net.getNetLength(NET_NAME);
 	const lengthMm = eda.sys_Unit.milToMm(lengthMil);
 	const lineWidthMm = Number(options.lineWidth);
-	const copperUm = Number(options.copper) || 35;
+	// 界面按 oz 输入，1 oz = 35 μm
+	const copperUm = (Number(options.copper) || 1) * 35;
 	const tempC = Number(options.temp) || 20;
 
 	return {
