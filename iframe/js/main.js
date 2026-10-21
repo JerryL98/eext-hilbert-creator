@@ -127,7 +127,9 @@ function simplify(points) {
  */
 function planCurve(options) {
 	const grid = calcGrid(options);
-	const cells = HilbertCore.buildPath({ cols: grid.cols, rows: grid.rows, mode: options.mode });
+	// 单层：两端相邻（便于接线）；双面：两端拉开，过孔打在远端
+	const closeEnds = options.layers !== 'both';
+	const cells = HilbertCore.buildPath({ cols: grid.cols, rows: grid.rows, mode: options.mode, close: closeEnds });
 	const layers = options.layers;
 	const p = grid.pitch;
 	const half = p / 2;

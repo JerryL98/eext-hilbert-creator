@@ -53,17 +53,11 @@
 			</div>
 
 			<div class="form-item">
-				<label for="mode">
-					模式：
-					<span id="mode-tip-icon">
-						<img src="/iframe/img/mode0.webp" id="mode-tip-img" alt="例子" />
-					</span>
-				</label>
+				<label for="mode" title="单层绘制时两端相邻，这里决定这对端子在底边的位置">端子位置：</label>
 				<select id="mode" name="mode">
-					<option value="0">0：起点左下</option>
-					<option value="1">1：起点右下</option>
-					<option value="2">2：起点左上</option>
-					<option value="3">3：起点右上</option>
+					<option value="0" selected>居左</option>
+					<option value="1">居中</option>
+					<option value="2">居右</option>
 				</select>
 			</div>
 
@@ -225,11 +219,6 @@
 					.catch(function (error) {
 						eda.sys_Message.showToastMessage('计算失败：' + error, 'error');
 					});
-			});
-
-			document.getElementById('mode').addEventListener('change', function () {
-				const mode = document.getElementById('mode').value;
-				document.getElementById('mode-tip-img').src = '/iframe/img/mode' + mode + '.webp';
 			});
 
 			document.getElementById('stop').addEventListener('click', function () {

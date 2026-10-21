@@ -651,6 +651,120 @@
 		return out;
 	}
 
+	function adjacent(a, b) {
+		return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) === 1;
+	}
+
+	/** 四象限首尾相接成环；无解返回 null */
+	function buildCycle(w, h) {
+		if (w < 2 || h < 2 || (w * h) % 2 === 1) {
+			return null;
+		}
+		const cols = uniqueNumbers(Math.floor(w / 2), Math.ceil(w / 2));
+		const rows = uniqueNumbers(Math.floor(h / 2), Math.ceil(h / 2));
+		for (let i = 0; i < cols.length; i += 1) {
+			for (let j = 0; j < rows.length; j += 1) {
+				const cycle = ringCycle(w, h, cols[i], rows[j]);
+				if (cycle) {
+					return cycle;
+				}
+			}
+		}
+		return null;
+	}
+
+	/** 左下 → 右下 → 右上 → 左上，首尾相接 */
+	function ringCycle(w, h, wA, hA) {
+		const wB = w - wA;
+		const hB = h - hA;
+		if (wB < 1 || hB < 1) {
+			return null;
+		}
+		const J1 = [
+			[SE, SW],
+			[NE, NW],
+		];
+		const J2 = [
+			[NW, SW],
+			[NE, SE],
+		];
+		const J3 = [
+			[NW, NE],
+			[SW, SE],
+		];
+		const J4 = [
+			[SW, NW],
+			[SE, NE],
+		];
+		for (let a = 0; a < 2; a += 1) {
+			for (let b = 0; b < 2; b += 1) {
+				for (let c = 0; c < 2; c += 1) {
+					for (let d = 0; d < 2; d += 1) {
+						const xbl = J1[a][0];
+						const ebr = J1[a][1];
+						const xbr = J2[b][0];
+						const etr = J2[b][1];
+						const xtr = J3[c][0];
+						const etl = J3[c][1];
+						const xtl = J4[d][0];
+						const ebl = J4[d][1];
+						if (!validCorners(wA, hA, ebl, xbl) || !validCorners(wB, hA, ebr, xbr)) {
+							continue;
+						}
+						if (!validCorners(wB, hB, etr, xtr) || !validCorners(wA, hB, etl, xtl)) {
+							continue;
+						}
+						const bl = solve(wA, hA, ebl, xbl);
+						const br = solve(wB, hA, ebr, xbr);
+						const tr = solve(wB, hB, etr, xtr);
+						const tl = solve(wA, hB, etl, xtl);
+						if (!bl || !br || !tr || !tl) {
+							continue;
+						}
+						const path = shiftPath(bl, 0, 0)
+							.concat(shiftPath(br, wA, 0))
+							.concat(shiftPath(tr, wA, hA))
+							.concat(shiftPath(tl, 0, hA));
+						if (path.length !== w * h) {
+							continue;
+						}
+						let ok = adjacent(path[path.length - 1], path[0]);
+						for (let i = 1; i < path.length && ok; i += 1) {
+							ok = adjacent(path[i - 1], path[i]);
+						}
+						if (ok) {
+							return path;
+						}
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	/** 在底边剪开闭环：mode 0=居左 1=居中 2=居右 */
+	function cutCycle(cycle, mode, cols) {
+		const target = mode === 0 ? 0 : mode === 2 ? cols - 1 : (cols - 1) / 2;
+		let best = -1;
+		let bestDist = Infinity;
+		for (let i = 0; i < cycle.length; i += 1) {
+			const prev = cycle[(i - 1 + cycle.length) % cycle.length];
+			const cur = cycle[i];
+			if (prev[1] !== 0 || cur[1] !== 0) {
+				continue;
+			}
+			const dist = Math.abs((prev[0] + cur[0]) / 2 - target);
+			if (dist < bestDist) {
+				bestDist = dist;
+				best = i;
+			}
+		}
+		if (best < 0) {
+			return null;
+		}
+		return cycle.slice(best).concat(cycle.slice(0, best));
+	}
+
 	/* ------------------------------------------------------------------ *
 	 * 对外接口
 	 * ------------------------------------------------------------------ */
@@ -664,16 +778,29 @@
 	 * @param options - 参数对象
 	 * @param options.cols - 列数
 	 * @param options.rows - 行数
-	 * @param options.mode - 起始方向模式，0 ~ 3
+	 * @param options.mode - 端子位置，0=居左 1=居中 2=居右
+	 * @param options.close - 是否让起点与终点相邻，默认 true
 	 * @returns 格点序列
 	 */
 	function buildPath(options) {
 		const cols = Math.max(1, Math.round(Number(options.cols) || 1));
 		const rows = Math.max(1, Math.round(Number(options.rows) || 1));
-		const mode = ((Math.round(Number(options.mode) || 0) % 4) + 4) % 4;
+		const mode = ((Math.round(Number(options.mode) || 0) % 3) + 3) % 3;
+		const close = options.close !== false;
 
 		if (solveCache.size > 20000) {
 			solveCache.clear();
+		}
+
+		if (close) {
+			// 单层：走一圈再剪开，两端自然相邻
+			const cycle = buildCycle(cols, rows);
+			if (cycle) {
+				const cut = cutCycle(cycle, mode, cols);
+				if (cut) {
+					return cut;
+				}
+			}
 		}
 
 		let base = null;
@@ -710,19 +837,7 @@
 			throw new Error('无法生成 ' + cols + 'x' + rows + ' 的曲线');
 		}
 
-		return base.map(function (point) {
-			let x = point[0];
-			let y = point[1];
-			if (mode === 1) {
-				x = cols - 1 - x;
-			} else if (mode === 2) {
-				y = rows - 1 - y;
-			} else if (mode === 3) {
-				x = cols - 1 - x;
-				y = rows - 1 - y;
-			}
-			return [x, y];
-		});
+		return base;
 	}
 
 	/** 按给定方式翻转一个点（用于绘制底层镜像图形） */
