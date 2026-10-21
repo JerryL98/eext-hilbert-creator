@@ -30,7 +30,7 @@ var edaEsbuildExportName = (() => {
   // extension.json
   var displayName = "Hilbert Creator";
   var description = "Hilbert Creator - \u5E0C\u5C14\u4F2F\u7279\u66F2\u7EBF\u751F\u6210\u5668";
-  var version = "1.6.5";
+  var version = "1.6.6";
 
   // src/index.ts
   function activate(status, arg) {
