@@ -6,6 +6,7 @@
 /build/dist/
 /config/
 /docs/
+/release/
 /coverage/
 /node_modules/
 /src/
