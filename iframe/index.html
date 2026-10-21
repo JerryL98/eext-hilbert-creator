@@ -5,6 +5,7 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<link href="/iframe/css/style.css" rel="stylesheet" />
+		<script src="/iframe/js/hilbert.js"></script>
 		<script src="/iframe/js/main.js"></script>
 	</head>
 	<body>
@@ -25,13 +26,18 @@
 			</div>
 
 			<div class="form-item">
-				<label for="iterations">迭代次数：</label>
-				<input type="number" id="iterations" name="iterations" value="5" min="1" />
+				<label for="iterations" title="列数 = 2 的迭代次数次方，步距 = 区域宽 ÷（列数 - 1）">迭代次数：</label>
+				<input type="number" id="iterations" name="iterations" value="5" min="1" max="11" step="1" />
 			</div>
 
 			<div class="form-item">
-				<label for="height">尺寸（mm）：</label>
-				<input type="number" id="height" name="height" value="20" />
+				<label for="width" title="区域宽度沿 X 方向，起始点位于区域左下角">区域宽X（mm）：</label>
+				<input type="number" id="width" name="width" value="20" min="0.001" step="0.1" />
+			</div>
+
+			<div class="form-item">
+				<label for="height" title="区域高度沿 Y 方向，行数按步距铺满该高度">区域高Y（mm）：</label>
+				<input type="number" id="height" name="height" value="20" min="0.001" step="0.1" />
 			</div>
 
 			<div class="form-item">
@@ -49,46 +55,109 @@
 				</select>
 			</div>
 
+			<div class="form-item">
+				<label for="layers" title="双面会在顶层和底层各画一份">布线层：</label>
+				<select id="layers" name="layers">
+					<option value="top">顶层</option>
+					<option value="bottom">底层</option>
+					<option value="both" selected>双面（顶+底）</option>
+				</select>
+			</div>
+
+			<div class="form-item">
+				<label for="mirror" title="仅作用于底层，以区域中心为基准翻转">底层镜像：</label>
+				<select id="mirror" name="mirror">
+					<option value="none" selected>无</option>
+					<option value="h">水平翻转</option>
+					<option value="v">垂直翻转</option>
+					<option value="both">中心对称</option>
+				</select>
+			</div>
+
+			<div id="info" class="form-info"></div>
+
 			<button id="draw">绘制</button>
 			<button id="calc">计算</button>
 			<button id="stop" class="btn-danger hidden">终止</button>
 			<button id="clear" class="btn-danger hidden">清空</button>
 		</div>
 		<script>
-			document.getElementById('draw').addEventListener('click', function () {
-				// const netName = document.getElementById('net-name').value;
-				const lineWidth = document.getElementById('lineWidth').value;
-				const startX = document.getElementById('startX').value;
-				const startY = document.getElementById('startY').value;
-				const iterations = document.getElementById('iterations').value;
-				const height = document.getElementById('height').value;
-				const mode = document.getElementById('mode').value;
+			function updateInfo() {
+				const info = document.getElementById('info');
+				try {
+					const grid = calcGrid({
+						iterations: document.getElementById('iterations').value,
+						width: document.getElementById('width').value,
+						height: document.getElementById('height').value,
+					});
+					const pitch = eda.sys_Unit.milToMm(grid.pitch);
+					const realW = eda.sys_Unit.milToMm((grid.cols - 1) * grid.pitch);
+					const realH = eda.sys_Unit.milToMm((grid.rows - 1) * grid.pitch);
+					info.textContent =
+						'步距 ' +
+						pitch.toFixed(3) +
+						' mm ｜ 网格 ' +
+						grid.cols +
+						' × ' +
+						grid.rows +
+						' ｜ 实际 ' +
+						realW.toFixed(2) +
+						' × ' +
+						realH.toFixed(2) +
+						' mm';
+				} catch (error) {
+					info.textContent = error.message;
+				}
+			}
 
+			['iterations', 'width', 'height'].forEach(function (id) {
+				document.getElementById(id).addEventListener('input', updateInfo);
+			});
+			updateInfo();
+
+			document.getElementById('draw').addEventListener('click', function () {
+				const options = {
+					lineWidth: document.getElementById('lineWidth').value,
+					startX: document.getElementById('startX').value,
+					startY: document.getElementById('startY').value,
+					iterations: document.getElementById('iterations').value,
+					width: document.getElementById('width').value,
+					height: document.getElementById('height').value,
+					mode: document.getElementById('mode').value,
+					layers: document.getElementById('layers').value,
+					mirror: document.getElementById('mirror').value,
+				};
+
+				document.getElementById('draw').disabled = true;
 				document.getElementById('stop').classList.remove('hidden');
 				document.getElementById('clear').classList.add('hidden');
 
-				drawHilbertCurve(lineWidth, startX, startY, iterations, height, mode)
-					.then(() => {
-						eda.sys_Message.showToastMessage('绘制完成', 'success');
+				drawHilbertCurve(options)
+					.then(function (result) {
+						if (result.interrupted) {
+							eda.sys_Message.showToastMessage('已终止，绘制 ' + result.drawn + ' / ' + result.total + ' 段', 'warn');
+						} else {
+							eda.sys_Message.showToastMessage('绘制完成，共 ' + result.total + ' 段', 'success');
+						}
+					})
+					.catch(function (error) {
+						eda.sys_Message.showToastMessage('绘制失败：' + error.message, 'error');
+					})
+					.finally(function () {
+						document.getElementById('draw').disabled = false;
 						document.getElementById('stop').classList.add('hidden');
 						document.getElementById('clear').classList.remove('hidden');
-					})
-					.catch((error) => {
-						eda.sys_Message.showToastMessage('绘制失败：' + error, 'error');
 					});
 			});
 
 			document.getElementById('calc').addEventListener('click', function () {
 				const lineWidth = document.getElementById('lineWidth').value;
-				console.log('lineWidth:', lineWidth); // 调试信息
 
 				calcResistance(lineWidth)
-					.then((resistance) => {
-						console.log('resistance:', resistance); // 调试信息
+					.then(function (resistance) {
 						eda.sys_Message.showToastMessage('计算完成，电阻值为：' + resistance, 'success');
 					})
-					.catch((error) => {
-						console.error('error:', error); // 调试信息
+					.catch(function (error) {
 						eda.sys_Message.showToastMessage('计算失败：' + error, 'error');
 					});
 			});
@@ -105,13 +174,13 @@
 
 			document.getElementById('clear').addEventListener('click', function () {
 				document.getElementById('clear').classList.add('hidden');
-				eda.pcb_PrimitiveLine.getAllPrimitiveId('HILBERT').then((ids) => {
+				eda.pcb_PrimitiveLine.getAllPrimitiveId('HILBERT').then(function (ids) {
 					eda.pcb_PrimitiveLine
 						.delete(ids)
-						.then(() => {
+						.then(function () {
 							eda.sys_Message.showToastMessage('清除完成', 'success');
 						})
-						.catch((error) => {
+						.catch(function (error) {
 							eda.sys_Message.showToastMessage('清除失败：' + error, 'error');
 						});
 				});
