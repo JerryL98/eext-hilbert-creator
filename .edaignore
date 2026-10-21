@@ -5,6 +5,7 @@
 !/build/
 /build/dist/
 /config/
+/docs/
 /coverage/
 /node_modules/
 /src/

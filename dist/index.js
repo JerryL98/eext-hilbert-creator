@@ -30,14 +30,14 @@ var edaEsbuildExportName = (() => {
   // extension.json
   var displayName = "Hilbert Creator";
   var description = "Hilbert Creator - \u5E0C\u5C14\u4F2F\u7279\u66F2\u7EBF\u751F\u6210\u5668";
-  var version = "1.6.3";
+  var version = "1.6.4";
 
   // src/index.ts
   function activate(status, arg) {
   }
   function about() {
     eda.sys_Dialog.showInformationMessage(
-      displayName + " " + version + "\n" + description + "\n Github: https://github.com/klxf/eext-hilbert-creator",
+      displayName + " " + version + "\n" + description + "\u57FA\u4E8E klxf/eext-hilbert-creator \u6539\u8FDB\uFF08AI \u8F85\u52A9\uFF09\n Github: https://github.com/JerryL98/eext-hilbert-creator",
       "\u5173\u4E8E"
     );
   }
