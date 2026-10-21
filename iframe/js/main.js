@@ -84,6 +84,37 @@ function copperResistance(lengthMm, lineWidthMm, copperUm, tempC) {
 }
 
 /**
+ * 合并共线点
+ *
+ * 希尔伯特曲线里有大量连续同向的格子（一段直线跨好几格），
+ * 合成一条线段后图元数量能少一半以上，绘制速度提升明显，几何形状完全不变。
+ *
+ * @param points - 原始点序列
+ * @returns 简化后的点序列
+ */
+function simplify(points) {
+	if (points.length < 3) {
+		return points;
+	}
+	const out = [points[0]];
+	for (let i = 1; i < points.length - 1; i += 1) {
+		const prev = out[out.length - 1];
+		const cur = points[i];
+		const next = points[i + 1];
+		const d1x = cur[0] - prev[0];
+		const d1y = cur[1] - prev[1];
+		const d2x = next[0] - cur[0];
+		const d2y = next[1] - cur[1];
+		// 叉积不为 0 说明方向变了，必须保留该点
+		if (Math.abs(d1x * d2y - d1y * d2x) > 1e-9) {
+			out.push(cur);
+		}
+	}
+	out.push(points[points.length - 1]);
+	return out;
+}
+
+/**
  * 规划曲线（只算坐标，不碰 EDA 图元）
  *
  * 双面错开时：
@@ -153,6 +184,10 @@ function planCurve(options) {
 		targets.push({ layer: LAYER_BOTTOM, points: staggered ? bottom : single });
 	}
 
+	for (let t = 0; t < targets.length; t += 1) {
+		targets[t].points = simplify(targets[t].points);
+	}
+
 	let lengthMil = 0;
 	for (let t = 0; t < targets.length; t += 1) {
 		const points = targets[t].points;
@@ -191,34 +226,38 @@ async function drawHilbertCurve(options) {
 	// 临时解决方案，2.2.35.4 已修复
 	const lineWidth = eda.sys_Unit.mmToMil(lineWidthMm);
 
-	let total = 0;
+	// 先把所有线段拍平，再分批并发提交，比逐段 await 快一个数量级
+	const segments = [];
 	for (let t = 0; t < plan.targets.length; t += 1) {
-		total += plan.targets[t].points.length - 1;
+		const target = plan.targets[t];
+		for (let i = 1; i < target.points.length; i += 1) {
+			segments.push([
+				target.layer,
+				originX + target.points[i - 1][0],
+				originY + target.points[i - 1][1],
+				originX + target.points[i][0],
+				originY + target.points[i][1],
+			]);
+		}
 	}
 
+	const total = segments.length;
+	const CHUNK = 24;
 	let drawn = 0;
 	let vias = 0;
 	try {
-		for (let t = 0; t < plan.targets.length; t += 1) {
-			const target = plan.targets[t];
-			for (let i = 1; i < target.points.length; i += 1) {
-				if (stopped) {
-					break;
-				}
-				await eda.pcb_PrimitiveLine.create(
-					NET_NAME,
-					target.layer,
-					originX + target.points[i - 1][0],
-					originY + target.points[i - 1][1],
-					originX + target.points[i][0],
-					originY + target.points[i][1],
-					lineWidth,
-				);
-				drawn += 1;
-			}
+		for (let i = 0; i < segments.length; i += CHUNK) {
 			if (stopped) {
 				break;
 			}
+			const batch = [];
+			const end = Math.min(i + CHUNK, segments.length);
+			for (let k = i; k < end; k += 1) {
+				const s = segments[k];
+				batch.push(eda.pcb_PrimitiveLine.create(NET_NAME, s[0], s[1], s[2], s[3], s[4], lineWidth));
+			}
+			await Promise.all(batch);
+			drawn += batch.length;
 		}
 		if (!stopped && plan.via) {
 			await eda.pcb_PrimitiveVia.create(

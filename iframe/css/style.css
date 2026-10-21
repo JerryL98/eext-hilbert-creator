@@ -189,3 +189,11 @@ input[type='number'] {
 	-moz-appearance: textfield;
 	appearance: textfield;
 }
+.form-hint {
+	font-size: 12px;
+	color: #888;
+	text-align: right;
+	margin: -2px 0 6px;
+	padding-right: 6px;
+	line-height: 1.2;
+}

@@ -42,14 +42,10 @@
 
 			<div class="form-item">
 				<label for="copper">铜厚（oz）：</label>
-				<input type="text" inputmode="decimal" id="copper" name="copper" value="1" list="copper-presets" />
-				<datalist id="copper-presets">
-					<option value="0.5"></option>
-					<option value="1"></option>
-					<option value="1.5"></option>
-					<option value="2"></option>
-				</datalist>
+				<input type="text" inputmode="decimal" id="copper" name="copper" value="1" />
 			</div>
+
+			<div id="copper-hint" class="form-hint">1 oz = 35 μm</div>
 
 			<div class="form-item">
 				<label for="temp" title="电阻会按铜的温度系数换算到该温度">工作温度（℃）：</label>
@@ -148,6 +144,9 @@
 					const r20 = copperUm > 0 ? copperResistance(lengthMm, Number(options.lineWidth), copperUm, 20) : NaN;
 					const rTemp = copperUm > 0 ? copperResistance(lengthMm, Number(options.lineWidth), copperUm, temp) : NaN;
 					const r20Text = isFinite(r20) ? r20.toFixed(3) + ' Ω' : '铜厚无效';
+					document.getElementById('copper-hint').textContent = copperUm > 0
+						? '当前 ≈ ' + Number(copperUm.toFixed(2)) + ' μm（1 oz = 35 μm）'
+						: '填数字即可，1 oz = 35 μm';
 
 					let html =
 						'步距 ' +
