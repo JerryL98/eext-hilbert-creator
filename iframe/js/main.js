@@ -38,26 +38,49 @@ function calcGrid(options) {
 		throw new Error('区域宽度和高度都必须大于 0');
 	}
 
-	const pitchMm = lineWidth + gap;
-	const pitch = eda.sys_Unit.mmToMil(pitchMm);
+	const requestedPitchMm = lineWidth + gap;
 	const widthMil = eda.sys_Unit.mmToMil(width);
 	const heightMil = eda.sys_Unit.mmToMil(height);
-	// +1e-6 吸收浮点误差，避免 20 / 0.4 = 49.999… 被 floor 成 49
-	const cols = Math.floor(widthMil / pitch + 1e-6) + 1;
-	const rows = Math.floor(heightMil / pitch + 1e-6) + 1;
+
+	let pitch = eda.sys_Unit.mmToMil(requestedPitchMm);
+	let cols = 0;
+	let rows = 0;
+	let adjusted = false;
+	// 两端相邻要靠「走满一圈再剪开」，而格子总数为奇数时闭环不存在（棋盘染色）。
+	// 这种尺寸上少一排一半、把步距补足，区域尺寸仍是填的那个，间距只大一点点。
+	for (let guard = 0; guard < 8; guard += 1) {
+		// +1e-6 吸收浮点误差，避免 20 / 0.4 = 49.999… 被 floor 成 49
+		cols = Math.floor(widthMil / pitch + 1e-6) + 1;
+		rows = Math.floor(heightMil / pitch + 1e-6) + 1;
+		if (cols < 3 || rows < 3 || (cols * rows) % 2 === 0) {
+			break;
+		}
+		const nextPitch = Math.min(widthMil / (cols - 2), heightMil / (rows - 2));
+		// 步距只允许微调（5% 以内），否则宁可保持原样
+		if (!(nextPitch > pitch) || nextPitch / pitch > 1.05) {
+			break;
+		}
+		pitch = nextPitch;
+		adjusted = true;
+	}
 
 	if (cols < 2 || rows < 2) {
-		throw new Error('区域放不下一个步距（' + pitchMm.toFixed(3) + ' mm），请减小线宽/间距或加大区域');
+		throw new Error('区域放不下一个步距（' + requestedPitchMm.toFixed(3) + ' mm），请减小线宽/间距或加大区域');
 	}
 	if (cols * rows > 40000) {
 		throw new Error('网格过大（' + cols + ' × ' + rows + ' 格），请加大间距或缩小区域');
 	}
+
+	const pitchMm = eda.sys_Unit.milToMm(pitch);
 
 	return {
 		cols: cols,
 		rows: rows,
 		pitch: pitch,
 		pitchMm: pitchMm,
+		requestedPitchMm: requestedPitchMm,
+		gapMm: pitchMm - lineWidth,
+		adjusted: adjusted,
 		realWidthMm: (cols - 1) * pitchMm,
 		realHeightMm: (rows - 1) * pitchMm,
 	};
@@ -115,6 +138,27 @@ function simplify(points) {
 }
 
 /**
+ * 末端格子朝区域外的方向
+ *
+ * 只取水平或竖直，过孔才能用一段直角走线接过去；斜着拉会在孔盘旁边留下尖角，
+ * 而且孔盘容易压到相邻走线。
+ *
+ * @param x - 末端 X（mil）
+ * @param y - 末端 Y（mil）
+ * @param cx - 区域中心 X（mil）
+ * @param cy - 区域中心 Y（mil）
+ * @returns 单位方向 `[dx, dy]`
+ */
+function outwardDirection(x, y, cx, cy) {
+	const dx = x - cx;
+	const dy = y - cy;
+	if (Math.abs(dx) >= Math.abs(dy)) {
+		return [dx >= 0 ? 1 : -1, 0];
+	}
+	return [0, dy >= 0 ? 1 : -1];
+}
+
+/**
  * 规划曲线（只算坐标，不碰 EDA 图元）
  *
  * 双面错开时：
@@ -145,6 +189,7 @@ function planCurve(options) {
 	const useVia = staggered && options.via !== false;
 	const leadMil = eda.sys_Unit.mmToMil(Math.max(0, Number(options.lead) || 0));
 	const viaDiaMm = Math.max(0.2, Number(options.viaDiameter) || 0.6);
+	const lineWidthMm = Number(options.lineWidth) > 0 ? Number(options.lineWidth) : 0.2;
 
 	const cx = ((grid.cols - 1) * p) / 2;
 	const cy = ((grid.rows - 1) * p) / 2;
@@ -158,14 +203,19 @@ function planCurve(options) {
 		for (let i = 0; i < cells.length; i += 1) {
 			top.push([cells[i][0] * p, cells[i][1] * p]);
 		}
+		// 底层整体偏移半个步距，末端正好落在顶层的空隙里
+		const q = [last[0] * p + half, last[1] * p + half];
+		const clearMil = eda.sys_Unit.mmToMil(0.2);
 		if (useVia) {
-			// 过孔放在区域外侧的对角方向，免得孔盘压到相邻走线
-			const sx = last[0] * p - cx >= 0 ? 1 : -1;
-			const sy = last[1] * p - cy >= 0 ? 1 : -1;
-			const r = eda.sys_Unit.mmToMil(viaDiaMm / 2 + 0.15);
-			via = { x: last[0] * p + sx * r * Math.SQRT1_2, y: last[1] * p + sy * r * Math.SQRT1_2 };
+			// 过孔沿边界法线挪到区域外面：孔盘边缘离最近走线还有 0.2 mm，
+			// 两层都用直角接过去，不再斜着拉一段
+			const outward = outwardDirection(last[0] * p, last[1] * p, cx, cy);
+			const r = eda.sys_Unit.mmToMil(viaDiaMm / 2 + lineWidthMm / 2) + clearMil;
+			via = { x: last[0] * p + outward[0] * r, y: last[1] * p + outward[1] * r };
 			top.push([via.x, via.y]);
 			bottom.push([via.x, via.y]);
+			// 顶层末端与底层末端差半个步距，用一段直角折线过渡
+			bottom.push(outward[0] !== 0 ? [via.x, q[1]] : [q[0], via.y]);
 		}
 		for (let i = cells.length - 1; i >= 0; i -= 1) {
 			bottom.push([cells[i][0] * p + half, cells[i][1] * p + half]);
@@ -174,6 +224,7 @@ function planCurve(options) {
 			const t0 = top[0];
 			const q0 = bottom[bottom.length - 1];
 			const onEdge = t0[0] === 0 || t0[0] === (grid.cols - 1) * p;
+			const gapMil = eda.sys_Unit.mmToMil(0.8);
 			if (onEdge) {
 				// 端子在左右角上：顶层水平向外，底层竖直向外，两个端子自然拉开
 				const dirX = t0[0] === 0 ? -1 : 1;
@@ -181,10 +232,16 @@ function planCurve(options) {
 				const dirY = q0[1] - cy >= 0 ? 1 : -1;
 				bottom.push([q0[0], q0[1] + dirY * leadMil]);
 			} else {
-				// 端子在底边中间：沿底边走会跟自己短路，两层都往下引，斜着分开
+				// 端子在底边中间：沿底边走会跟自己这层的走线短路，
+				// 改成竖直向下、横让一步、再向下，全程直角，两个端子也拉开
 				top.unshift([t0[0], t0[1] - leadMil]);
-				const d = leadMil * Math.SQRT1_2;
-				bottom.push([q0[0] + d, q0[1] - d]);
+				const side = t0[0] <= ((grid.cols - 1) * p) / 2 ? 1 : -1;
+				const dropMil = eda.sys_Unit.mmToMil(0.6);
+				const jog = q0[0] + side * (leadMil + gapMil + eda.sys_Unit.mmToMil(1.2));
+				const y = q0[1] - dropMil;
+				bottom.push([q0[0], y]);
+				bottom.push([jog, y]);
+				bottom.push([jog, y - leadMil]);
 			}
 		}
 	} else {

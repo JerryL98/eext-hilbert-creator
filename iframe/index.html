@@ -163,11 +163,13 @@
 					if (Number(options.gap) <= 0) {
 						html += '<br />⚠ 间距为 0，相邻走线会贴在一起（短路）';
 					}
-					if (plan.staggered && plan.via) {
-						const via = Number(options.viaDiameter) || 0.6;
-						if (grid.pitchMm < via + Number(options.lineWidth)) {
-							html += '<br />⚠ 步距 ' + grid.pitchMm.toFixed(3) + ' mm 小于过孔外径 + 线宽，过孔可能压到相邻走线';
-						}
+					if (grid.adjusted) {
+						html +=
+							'<br />为让两端相邻，格子取偶数：实际步距 ' +
+							grid.pitchMm.toFixed(3) +
+							' mm，间距 ' +
+							grid.gapMm.toFixed(3) +
+							' mm（比设定略大，区域尺寸不变）';
 					}
 					info.innerHTML = html;
 				} catch (error) {
