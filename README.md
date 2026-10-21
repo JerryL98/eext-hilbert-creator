@@ -26,7 +26,7 @@
 
 ## 开始使用
 
-1. 下载 `build/dist` 下的 `.eext`，在 **嘉立创EDA** 或 **EasyEDA** 专业版中安装（或用源码 `npm run build` 自行构建）
+1. 从 [Actions](https://github.com/JerryL98/eext-hilbert-creator/actions) 最新一次构建的工件（artifact）里下载 `.eext`，在 **嘉立创EDA** 或 **EasyEDA** 专业版中安装；也可以拉源码后 `npm run build`，产物在 `build/dist`
 
 2. 在 PCB 页面中，点击顶部菜单的 `希尔伯特` → `生成希尔伯特曲线...`，即可打开本扩展
 
