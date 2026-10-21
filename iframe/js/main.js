@@ -118,8 +118,8 @@ function simplify(points) {
  * 规划曲线（只算坐标，不碰 EDA 图元）
  *
  * 双面错开时：
- * - 顶层从近端走到远端，在远端打一个过孔；
- * - 底层整体偏移半个步距（正好落在顶层的空隙里），从过孔绕回近端；
+ * - 顶层从底边的「端子位置」出发走到远端，在远端打一个过孔；
+ * - 底层整体偏移半个步距（正好落在顶层的空隙里），从过孔绕回端子处；
  * - 两端各引出一段线当接线端子，避免两个端子只隔半个步距没法焊接。
  *
  * @param options - 界面参数
@@ -129,7 +129,15 @@ function planCurve(options) {
 	const grid = calcGrid(options);
 	// 单层：两端相邻（便于接线）；双面：两端拉开，过孔打在远端
 	const closeEnds = options.layers !== 'both';
-	const cells = HilbertCore.buildPath({ cols: grid.cols, rows: grid.rows, mode: options.mode, close: closeEnds });
+	const dual = options.layers === 'both';
+	// 双面：起点落在底边的「端子位置」上，终点留给过孔
+	const cells = HilbertCore.buildPath({
+		cols: grid.cols,
+		rows: grid.rows,
+		mode: options.mode,
+		close: closeEnds,
+		dual: dual,
+	});
 	const layers = options.layers;
 	const p = grid.pitch;
 	const half = p / 2;
@@ -163,13 +171,21 @@ function planCurve(options) {
 			bottom.push([cells[i][0] * p + half, cells[i][1] * p + half]);
 		}
 		if (leadMil > 0) {
-			// 顶层端子水平向外，底层端子竖直向外，两个端子自然拉开
 			const t0 = top[0];
-			const dirX = t0[0] - cx >= 0 ? 1 : -1;
-			top.unshift([t0[0] + dirX * leadMil, t0[1]]);
 			const q0 = bottom[bottom.length - 1];
-			const dirY = q0[1] - cy >= 0 ? 1 : -1;
-			bottom.push([q0[0], q0[1] + dirY * leadMil]);
+			const onEdge = t0[0] === 0 || t0[0] === (grid.cols - 1) * p;
+			if (onEdge) {
+				// 端子在左右角上：顶层水平向外，底层竖直向外，两个端子自然拉开
+				const dirX = t0[0] === 0 ? -1 : 1;
+				top.unshift([t0[0] + dirX * leadMil, t0[1]]);
+				const dirY = q0[1] - cy >= 0 ? 1 : -1;
+				bottom.push([q0[0], q0[1] + dirY * leadMil]);
+			} else {
+				// 端子在底边中间：沿底边走会跟自己短路，两层都往下引，斜着分开
+				top.unshift([t0[0], t0[1] - leadMil]);
+				const d = leadMil * Math.SQRT1_2;
+				bottom.push([q0[0] + d, q0[1] - d]);
+			}
 		}
 	} else {
 		for (let i = 0; i < cells.length; i += 1) {

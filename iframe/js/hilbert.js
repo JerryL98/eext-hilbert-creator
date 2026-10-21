@@ -766,43 +766,52 @@
 	}
 
 	/* ------------------------------------------------------------------ *
-	 * 对外接口
+	 * 构造三：双面布线用的开放路径
+	 *
+	 * 双面时顶层和底层各画一遍同样的格子（底层错开半个步距），中间用一个过孔串联，
+	 * 所以曲线本身必须是一条开放路径：起点在底边的指定位置（端子位置），
+	 * 终点尽量远离起点，过孔才打得开。
+	 * 「从角上出发」的走法已有；起点落在底边中间时，把区域左右切开，
+	 * 先走左半（SE → NE），再从右上角回到右半（NW → 某个角）。
 	 * ------------------------------------------------------------------ */
 
-	/**
-	 * 生成矩形网格上的希尔伯特曲线
-	 *
-	 * 终点角点有多个合法选择，不同选择会得到差异极大的形状（有的会退化成梳状长条），
-	 * 这里把两套构造的候选全部试一遍，取「最长直线段最短」的那个。
-	 *
-	 * @param options - 参数对象
-	 * @param options.cols - 列数
-	 * @param options.rows - 行数
-	 * @param options.mode - 端子位置，0=居左 1=居中 2=居右
-	 * @param options.close - 是否让起点与终点相邻，默认 true
-	 * @returns 格点序列
-	 */
-	function buildPath(options) {
-		const cols = Math.max(1, Math.round(Number(options.cols) || 1));
-		const rows = Math.max(1, Math.round(Number(options.rows) || 1));
-		const mode = ((Math.round(Number(options.mode) || 0) % 3) + 3) % 3;
-		const close = options.close !== false;
-
-		if (solveCache.size > 20000) {
-			solveCache.clear();
+	/** 底边上按端子位置取起始列：0=居左 1=居中 2=居右 */
+	function startColumn(cols, mode) {
+		if (mode === 2) {
+			return cols - 1;
 		}
+		if (mode === 1) {
+			return Math.round((cols - 1) / 2);
+		}
+		return 0;
+	}
 
-		if (close) {
-			// 单层：走一圈再剪开，两端自然相邻
-			const cycle = buildCycle(cols, rows);
-			if (cycle) {
-				const cut = cutCycle(cycle, mode, cols);
-				if (cut) {
-					return cut;
-				}
+	/** 水平镜像 */
+	function mirrorPath(path, cols) {
+		const out = [];
+		for (let i = 0; i < path.length; i += 1) {
+			out.push([cols - 1 - path[i][0], path[i][1]]);
+		}
+		return out;
+	}
+
+	/** 子矩形的候选走法（进出都在角点上），坐标相对子矩形 */
+	function segmentCandidates(w, h, entry, exit) {
+		const out = [];
+		const add = function (candidate) {
+			if (candidate) {
+				out.push(candidate);
 			}
-		}
+		};
+		// solve 内部已按「最长直线段最短」挑过四象限分割，另外两个构造的形状差别可能很大
+		add(solve(w, h, entry, exit));
+		add(fill(0, 0, w, h, entry, exit));
+		add(solveBisect(w, h, entry, exit));
+		return out;
+	}
 
+	/** 起点在左下角、终点落在某个角，几种构造里挑最长直线段最短的 */
+	function fromCorner(cols, rows) {
 		let base = null;
 		let bestScore = Infinity;
 		const consider = function (candidate) {
@@ -833,10 +842,254 @@
 				consider(transposePath(solve(rows, cols, SW, exit)));
 			}
 		}
+		return base;
+	}
+
+	/** 路径是否自洽：走满整片网格、每步只走一格 */
+	function coherent(path, cols, rows) {
+		if (!path || path.length !== cols * rows) {
+			return false;
+		}
+		const seen = new Set();
+		for (let i = 0; i < path.length; i += 1) {
+			const key = path[i][0] + ',' + path[i][1];
+			if (path[i][0] < 0 || path[i][0] >= cols || path[i][1] < 0 || path[i][1] >= rows) {
+				return false;
+			}
+			if (seen.has(key)) {
+				return false;
+			}
+			seen.add(key);
+			if (i > 0 && !adjacent(path[i - 1], path[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** 路径最后一步的方向与长度（步数） */
+	function tailRun(path) {
+		if (path.length < 2) {
+			return { dir: null, len: 0 };
+		}
+		const n = path.length;
+		const dir = [path[n - 1][0] - path[n - 2][0], path[n - 1][1] - path[n - 2][1]];
+		let len = 1;
+		for (let i = n - 2; i >= 1; i -= 1) {
+			if (path[i][0] - path[i - 1][0] !== dir[0] || path[i][1] - path[i - 1][1] !== dir[1]) {
+				break;
+			}
+			len += 1;
+		}
+		return { dir: dir, len: len };
+	}
+
+	/** 路径第一步的方向与长度（步数） */
+	function headRun(path) {
+		if (path.length < 2) {
+			return { dir: null, len: 0 };
+		}
+		const dir = [path[1][0] - path[0][0], path[1][1] - path[0][1]];
+		let len = 1;
+		for (let i = 2; i < path.length; i += 1) {
+			if (path[i][0] - path[i - 1][0] !== dir[0] || path[i][1] - path[i - 1][1] !== dir[1]) {
+				break;
+			}
+			len += 1;
+		}
+		return { dir: dir, len: len };
+	}
+
+	/** 底边中间起点的候选走法，参数面板每次输入都会重算，这里记忆化一下 */
+	const centerCache = new Map();
+
+	function centerPath(cols, rows, sx) {
+		const key = cols + '|' + rows + '|' + sx;
+		if (centerCache.has(key)) {
+			return centerCache.get(key);
+		}
+		const path = centerBuild(cols, rows, sx);
+		if (centerCache.size > 64) {
+			centerCache.clear();
+		}
+		centerCache.set(key, path);
+		return path;
+	}
+
+	/** 起点在底边第 sx 列：左右切块，左半 SE → NE，右半 NW → 某个角 */
+	function centerBuild(cols, rows, sx) {
+		const lw = sx + 1;
+		const rw = cols - 1 - sx;
+		if (lw < 2 || rw < 1) {
+			return null;
+		}
+		const lefts = segmentCandidates(lw, rows, SE, NE);
+		if (lefts.length === 0) {
+			return null;
+		}
+		const padX = sx;
+		// 终点至少要走到区域另一头，过孔才不会贴着端子
+		const farEnough = Math.max(1, Math.floor((cols - 1) / 2));
+		let best = null;
+		let bestRun = Infinity;
+		let bestFar = -1;
+		let near = null;
+		let nearRun = Infinity;
+		let nearFar = -1;
+		for (let i = 0; i < lefts.length; i += 1) {
+			const left = lefts[i];
+			const leftRun = longestRun(left);
+			const tail = tailRun(left);
+			for (const exit of [SE, NE, SW]) {
+				if (!validCorners(rw, rows, NW, exit)) {
+					continue;
+				}
+				const rights = segmentCandidates(rw, rows, NW, exit);
+				for (let j = 0; j < rights.length; j += 1) {
+					const right = rights[j];
+					if (left.length + right.length !== cols * rows) {
+						continue;
+					}
+					const head = headRun(right);
+					const last = left[left.length - 1];
+					const first = right[0];
+					if (Math.abs(first[0] + sx + 1 - last[0]) + Math.abs(first[1] - last[1]) !== 1) {
+						continue;
+					}
+					// 跨接缝那一段：只可能由左段末尾、接缝、右段开头拼起来
+					let cross = 1;
+					const seam = [first[0] + sx + 1 - last[0], first[1] - last[1]];
+					const leftMatch = tail.dir && tail.dir[0] === seam[0] && tail.dir[1] === seam[1];
+					const rightMatch = head.dir && head.dir[0] === seam[0] && head.dir[1] === seam[1];
+					if (leftMatch && rightMatch) {
+						cross = tail.len + 1 + head.len;
+					} else if (leftMatch) {
+						cross = tail.len + 1;
+					} else if (rightMatch) {
+						cross = 1 + head.len;
+					}
+					const run = Math.max(leftRun, longestRun(right), cross);
+					const end = right[right.length - 1];
+					const dist = Math.abs(end[0] + sx + 1 - padX) + end[1];
+					if (dist >= farEnough) {
+						if (run < bestRun || (run === bestRun && dist > bestFar)) {
+							bestRun = run;
+							bestFar = dist;
+							best = [left, right];
+						}
+					} else if (run < nearRun || (run === nearRun && dist > nearFar)) {
+						nearRun = run;
+						nearFar = dist;
+						near = [left, right];
+					}
+				}
+			}
+		}
+		const pick = best || near;
+		if (!pick) {
+			return null;
+		}
+		const merged = pick[0].concat(shiftPath(pick[1], sx + 1, 0));
+		return coherent(merged, cols, rows) ? merged : null;
+	}
+
+	/** 双面用的开放路径：起点在底边指定位置，终点尽量远离 */
+	function buildOpenPath(cols, rows, mode) {
+		const sx = startColumn(cols, mode);
+		if (sx <= 0) {
+			return fromCorner(cols, rows);
+		}
+		if (sx >= cols - 1) {
+			return mirrorPath(fromCorner(cols, rows), cols);
+		}
+		// 居中：奇偶不允许时左右挪一列，挪一格（半个毫米）看不出来
+		let best = null;
+		let bestScore = Infinity;
+		for (const delta of [0, -1, 1]) {
+			const candidate = centerPath(cols, rows, sx + delta);
+			if (!candidate) {
+				continue;
+			}
+			const score = longestRun(candidate) - Math.abs(delta) * 0.001;
+			if (score < bestScore) {
+				bestScore = score;
+				best = candidate;
+			}
+		}
+		if (best) {
+			return best;
+		}
+		return fromCorner(cols, rows);
+	}
+
+	/* ------------------------------------------------------------------ *
+	 * 对外接口
+	 * ------------------------------------------------------------------ */
+
+	/**
+	 * 生成矩形网格上的希尔伯特曲线
+	 *
+	 * 终点角点有多个合法选择，不同选择会得到差异极大的形状（有的会退化成梳状长条），
+	 * 这里把两套构造的候选全部试一遍，取「最长直线段最短」的那个。
+	 *
+	 * @param options - 参数对象
+	 * @param options.cols - 列数
+	 * @param options.rows - 行数
+	 * @param options.mode - 端子位置，0=居左 1=居中 2=居右
+	 * @param options.close - 是否让起点与终点相邻，默认 true
+	 * @param options.dual - 双面布线用：两端拉开，起点按端子位置落在底边，终点尽量远
+	 * @returns 格点序列
+	 */
+	const pathCache = new Map();
+
+	function buildPath(options) {
+		const cols = Math.max(1, Math.round(Number(options.cols) || 1));
+		const rows = Math.max(1, Math.round(Number(options.rows) || 1));
+		const mode = ((Math.round(Number(options.mode) || 0) % 3) + 3) % 3;
+		const close = options.close !== false;
+		const dual = options.dual === true;
+
+		// 参数面板每次输入都会重算一遍，同样的网格没必要重复构造
+		const cacheKey = cols + '|' + rows + '|' + mode + '|' + (close ? 1 : 0) + '|' + (dual ? 1 : 0);
+		if (pathCache.has(cacheKey)) {
+			return pathCache.get(cacheKey);
+		}
+
+		if (solveCache.size > 20000) {
+			solveCache.clear();
+		}
+
+		let path = null;
+		// 双面：两端要拉开，过孔才打得开，所以走开放路径而不是剪环
+		if (dual) {
+			path = buildOpenPath(cols, rows, mode);
+		}
+
+		if (!path && close) {
+			// 单层：走一圈再剪开，两端自然相邻
+			const cycle = buildCycle(cols, rows);
+			if (cycle) {
+				path = cutCycle(cycle, mode, cols);
+			}
+		}
+
+		if (path) {
+			if (pathCache.size > 8) {
+				pathCache.clear();
+			}
+			pathCache.set(cacheKey, path);
+			return path;
+		}
+
+		const base = fromCorner(cols, rows);
 		if (!base) {
 			throw new Error('无法生成 ' + cols + 'x' + rows + ' 的曲线');
 		}
 
+		if (pathCache.size > 8) {
+			pathCache.clear();
+		}
+		pathCache.set(cacheKey, base);
 		return base;
 	}
 
