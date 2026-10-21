@@ -187,13 +187,14 @@ function distToSegment(px, py, a, b) {
  *
  * @param base - 末端格子坐标 `[x, y]`
  * @param dir - 外法线
+ * @param minDist - 起算距离（底层错开半个步距时，要留出一个步距才不会贴着相邻走线）
  * @param need - 孔心到走线中心线的最小距离（孔半径 + 半线宽 + 间距）
  * @param polylines - 两层所有格点连线
  * @returns `{ x, y }` 过孔坐标
  */
-function placeVia(base, dir, need, polylines) {
+function placeVia(base, dir, minDist, need, polylines) {
 	const step = eda.sys_Unit.mmToMil(0.05);
-	const reach = need + eda.sys_Unit.mmToMil(12);
+	const reach = minDist + eda.sys_Unit.mmToMil(12);
 	const farX = base[0] + dir[0] * reach;
 	const farY = base[1] + dir[1] * reach;
 	const minX = Math.min(base[0], farX) - need;
@@ -216,7 +217,7 @@ function placeVia(base, dir, need, polylines) {
 			local.push(a, b);
 		}
 	}
-	let dist = need;
+	let dist = Math.max(minDist, need);
 	let point = { x: base[0] + dir[0] * dist, y: base[1] + dir[1] * dist };
 	// 挪过的距离单调增大，最多试探几次就会停
 	for (let guard = 0; guard < 400 && local.length > 0; guard += 1) {
@@ -252,7 +253,8 @@ function leadSingle(points, leadMil, pitch) {
 	const first = points[0];
 	const lastPoint = points[points.length - 1];
 	const gapMil = eda.sys_Unit.mmToMil(0.8);
-	const dropMil = eda.sys_Unit.mmToMil(0.6);
+	// 横让那一段要跟底边那排走线保持一个步距，线宽大时不能还是 0.6 mm
+	const dropMil = Math.max(eda.sys_Unit.mmToMil(0.6), pitch);
 	// 横让的距离既要不小于引出线本身，又要够两个焊位摆开烙铁
 	const sideMil = Math.max(leadMil + gapMil + eda.sys_Unit.mmToMil(1.2), 2.5 * pitch);
 	const attach = function (atStart, pts) {
@@ -347,7 +349,10 @@ function planCurve(options) {
 			const clearMil = eda.sys_Unit.mmToMil(0.2);
 			const outward = edgeDirection(last[0] * p, last[1] * p, (grid.cols - 1) * p, (grid.rows - 1) * p);
 			const need = eda.sys_Unit.mmToMil(viaDiaMm / 2 + lineWidthMm / 2) + clearMil;
-			via = placeVia(topCells[topCells.length - 1], outward, need, [topCells, bottomCells]);
+			// 底层末端错开半个步距，接过去的那段会跟底层的走线平行：
+			// 至少让出「半格 + 一个步距」，两者的间距才跟图案里一致
+			const minDist = Math.max(need, half + p);
+			via = placeVia(topCells[topCells.length - 1], outward, minDist, need, [topCells, bottomCells]);
 			top.push([via.x, via.y]);
 			bottom.push([via.x, via.y]);
 			// 顶层末端与底层末端差半个步距，用一段直角折线过渡
@@ -371,10 +376,12 @@ function planCurve(options) {
 			} else {
 				// 端子在底边中间：沿底边走会跟自己这层的走线短路，
 				// 改成竖直向下、横让一步、再向下，全程直角，两个端子也拉开
-				top.unshift([t0[0], t0[1] - leadMil]);
-				const side = t0[0] <= ((grid.cols - 1) * p) / 2 ? 1 : -1;
-				const dropMil = eda.sys_Unit.mmToMil(0.6);
+				// 横让朝过孔的相反方向：过孔也在这一侧时，让出去的那段会扫到孔盘
+				const side = via ? (q0[0] >= via.x ? 1 : -1) : t0[0] <= ((grid.cols - 1) * p) / 2 ? 1 : -1;
+				// 横让那一步要离开底边一个步距，线宽大时不能还是 0.6 mm
+				const dropMil = Math.max(eda.sys_Unit.mmToMil(0.6), p);
 				const jog = q0[0] + side * (leadMil + gapMil + eda.sys_Unit.mmToMil(1.2));
+				top.unshift([t0[0], t0[1] - leadMil]);
 				const y = q0[1] - dropMil;
 				bottom.push([q0[0], y]);
 				bottom.push([jog, y]);
