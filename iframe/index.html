@@ -12,7 +12,22 @@
 		<div class="container">
 			<div class="form-item">
 				<label for="lineWidth">线宽（mm）：</label>
-				<input type="number" id="lineWidth" name="lineWidth" value="0.254" min="0" step="0.001" />
+				<input type="number" id="lineWidth" name="lineWidth" value="0.2" min="0.01" step="0.01" />
+			</div>
+
+			<div class="form-item">
+				<label for="gap">间距（mm）：</label>
+				<input type="number" id="gap" name="gap" value="0.2" min="0" step="0.01" />
+			</div>
+
+			<div class="form-item">
+				<label for="width" title="区域宽度沿 X 方向，起始点位于区域左下角">区域宽X（mm）：</label>
+				<input type="number" id="width" name="width" value="20" min="0.01" step="0.1" />
+			</div>
+
+			<div class="form-item">
+				<label for="height" title="区域高度沿 Y 方向">区域高Y（mm）：</label>
+				<input type="number" id="height" name="height" value="20" min="0.01" step="0.1" />
 			</div>
 
 			<div class="form-item">
@@ -26,18 +41,18 @@
 			</div>
 
 			<div class="form-item">
-				<label for="iterations" title="列数 = 2 的迭代次数次方，步距 = 区域宽 ÷（列数 - 1）">迭代次数：</label>
-				<input type="number" id="iterations" name="iterations" value="5" min="1" max="11" step="1" />
+				<label for="copper">铜厚（μm）：</label>
+				<select id="copper" name="copper">
+					<option value="12">12</option>
+					<option value="18">18</option>
+					<option value="35" selected>35</option>
+					<option value="70">70</option>
+				</select>
 			</div>
 
 			<div class="form-item">
-				<label for="width" title="区域宽度沿 X 方向，起始点位于区域左下角">区域宽X（mm）：</label>
-				<input type="number" id="width" name="width" value="20" min="0.001" step="0.1" />
-			</div>
-
-			<div class="form-item">
-				<label for="height" title="区域高度沿 Y 方向，行数按步距铺满该高度">区域高Y（mm）：</label>
-				<input type="number" id="height" name="height" value="20" min="0.001" step="0.1" />
+				<label for="temp" title="电阻会按铜的温度系数换算到该温度">工作温度（℃）：</label>
+				<input type="number" id="temp" name="temp" value="20" step="1" />
 			</div>
 
 			<div class="form-item">
@@ -56,7 +71,7 @@
 			</div>
 
 			<div class="form-item">
-				<label for="layers" title="双面会在顶层和底层各画一份">布线层：</label>
+				<label for="layers" title="双面会错开半个步距，让反面走线正好落在正面的空隙里">布线层：</label>
 				<select id="layers" name="layers">
 					<option value="top">顶层</option>
 					<option value="bottom">底层</option>
@@ -65,13 +80,26 @@
 			</div>
 
 			<div class="form-item">
-				<label for="mirror" title="仅作用于底层，以区域中心为基准翻转">底层镜像：</label>
-				<select id="mirror" name="mirror">
-					<option value="none" selected>无</option>
-					<option value="h">水平翻转</option>
-					<option value="v">垂直翻转</option>
-					<option value="both">中心对称</option>
-				</select>
+				<label>双面选项：</label>
+				<label class="form-check" title="反面整体偏移半个步距，落在正面走线的空隙里">
+					<input type="checkbox" id="offset" checked />
+					错开
+				</label>
+				<label class="form-check" title="远端打一个过孔，把正反面串成一条回路">
+					<input type="checkbox" id="via" checked />
+					过孔串联
+				</label>
+			</div>
+
+			<div class="form-item">
+				<label for="lead" title="两端各引出一段线当接线端子，0 表示不引出">引出线（mm）：</label>
+				<input type="number" id="lead" name="lead" value="2" min="0" step="0.5" />
+			</div>
+
+			<div class="form-item">
+				<label for="viaDiameter" title="过孔外径 / 孔径">过孔 外径/孔径：</label>
+				<input type="number" id="viaDiameter" name="viaDiameter" value="0.6" min="0.1" step="0.05" title="过孔外径（mm）" />
+				<input type="number" id="viaHole" name="viaHole" value="0.3" min="0.05" step="0.05" title="过孔孔径（mm）" />
 			</div>
 
 			<div id="info" class="form-info"></div>
@@ -82,51 +110,80 @@
 			<button id="clear" class="btn-danger hidden">清空</button>
 		</div>
 		<script>
+			function readOptions() {
+				return {
+					lineWidth: document.getElementById('lineWidth').value,
+					gap: document.getElementById('gap').value,
+					width: document.getElementById('width').value,
+					height: document.getElementById('height').value,
+					startX: document.getElementById('startX').value,
+					startY: document.getElementById('startY').value,
+					copper: document.getElementById('copper').value,
+					temp: document.getElementById('temp').value,
+					mode: document.getElementById('mode').value,
+					layers: document.getElementById('layers').value,
+					offset: document.getElementById('offset').checked,
+					via: document.getElementById('via').checked,
+					lead: document.getElementById('lead').value,
+					viaDiameter: document.getElementById('viaDiameter').value,
+					viaHole: document.getElementById('viaHole').value,
+				};
+			}
+
 			function updateInfo() {
 				const info = document.getElementById('info');
 				try {
-					const grid = calcGrid({
-						iterations: document.getElementById('iterations').value,
-						width: document.getElementById('width').value,
-						height: document.getElementById('height').value,
-					});
-					const pitch = eda.sys_Unit.milToMm(grid.pitch);
-					const realW = eda.sys_Unit.milToMm((grid.cols - 1) * grid.pitch);
-					const realH = eda.sys_Unit.milToMm((grid.rows - 1) * grid.pitch);
-					info.textContent =
+					const options = readOptions();
+					const plan = planCurve(options);
+					const grid = plan.grid;
+					const lengthMm = eda.sys_Unit.milToMm(plan.lengthMil);
+					const copper = Number(options.copper) || 35;
+					const temp = Number(options.temp) || 20;
+					const r20 = copperResistance(lengthMm, Number(options.lineWidth), copper, 20);
+					const rTemp = copperResistance(lengthMm, Number(options.lineWidth), copper, temp);
+
+					let html =
 						'步距 ' +
-						pitch.toFixed(3) +
-						' mm ｜ 网格 ' +
+						grid.pitchMm.toFixed(3) +
+						' mm ｜ ' +
 						grid.cols +
 						' × ' +
 						grid.rows +
-						' ｜ 实际 ' +
-						realW.toFixed(2) +
+						' 格 ｜ 实际 ' +
+						grid.realWidthMm.toFixed(2) +
 						' × ' +
-						realH.toFixed(2) +
-						' mm';
+						grid.realHeightMm.toFixed(2) +
+						' mm<br />线长 ' +
+						lengthMm.toFixed(1) +
+						' mm ｜ R@20℃ ' +
+						r20.toFixed(3) +
+						' Ω';
+					if (temp !== 20) {
+						html += ' ｜ R@' + temp + '℃ ' + rTemp.toFixed(3) + ' Ω';
+					}
+					if (Number(options.gap) <= 0) {
+						html += '<br />⚠ 间距为 0，相邻走线会贴在一起（短路）';
+					}
+					if (plan.staggered && plan.via) {
+						const via = Number(options.viaDiameter) || 0.6;
+						if (grid.pitchMm < via + Number(options.lineWidth)) {
+							html += '<br />⚠ 步距 ' + grid.pitchMm.toFixed(3) + ' mm 小于过孔外径 + 线宽，过孔可能压到相邻走线';
+						}
+					}
+					info.innerHTML = html;
 				} catch (error) {
 					info.textContent = error.message;
 				}
 			}
 
-			['iterations', 'width', 'height'].forEach(function (id) {
-				document.getElementById(id).addEventListener('input', updateInfo);
+			['lineWidth', 'gap', 'width', 'height', 'copper', 'temp', 'mode', 'layers', 'lead', 'viaDiameter', 'viaHole', 'offset', 'via'].forEach(function (id) {
+				const element = document.getElementById(id);
+				element.addEventListener(id === 'mode' || id === 'layers' || id === 'copper' ? 'change' : 'input', updateInfo);
 			});
 			updateInfo();
 
 			document.getElementById('draw').addEventListener('click', function () {
-				const options = {
-					lineWidth: document.getElementById('lineWidth').value,
-					startX: document.getElementById('startX').value,
-					startY: document.getElementById('startY').value,
-					iterations: document.getElementById('iterations').value,
-					width: document.getElementById('width').value,
-					height: document.getElementById('height').value,
-					mode: document.getElementById('mode').value,
-					layers: document.getElementById('layers').value,
-					mirror: document.getElementById('mirror').value,
-				};
+				const options = readOptions();
 
 				document.getElementById('draw').disabled = true;
 				document.getElementById('stop').classList.remove('hidden');
@@ -134,10 +191,11 @@
 
 				drawHilbertCurve(options)
 					.then(function (result) {
+						const viaText = result.vias > 0 ? '，过孔 1 个' : '';
 						if (result.interrupted) {
 							eda.sys_Message.showToastMessage('已终止，绘制 ' + result.drawn + ' / ' + result.total + ' 段', 'warn');
 						} else {
-							eda.sys_Message.showToastMessage('绘制完成，共 ' + result.total + ' 段', 'success');
+							eda.sys_Message.showToastMessage('绘制完成，共 ' + result.total + ' 段' + viaText + '，线长 ' + result.lengthMm.toFixed(1) + ' mm', 'success');
 						}
 					})
 					.catch(function (error) {
@@ -151,11 +209,13 @@
 			});
 
 			document.getElementById('calc').addEventListener('click', function () {
-				const lineWidth = document.getElementById('lineWidth').value;
-
-				calcResistance(lineWidth)
-					.then(function (resistance) {
-						eda.sys_Message.showToastMessage('计算完成，电阻值为：' + resistance, 'success');
+				calcResistance(readOptions())
+					.then(function (result) {
+						const tempText = result.tempC !== 20 ? '，' + result.tempC + '℃ 时 ' + result.rTemp.toFixed(3) + ' Ω' : '';
+						eda.sys_Message.showToastMessage(
+							'线长 ' + result.lengthMm.toFixed(1) + ' mm，电阻 ' + result.r20.toFixed(3) + ' Ω（20℃）' + tempText,
+							'success',
+						);
 					})
 					.catch(function (error) {
 						eda.sys_Message.showToastMessage('计算失败：' + error, 'error');
@@ -174,16 +234,28 @@
 
 			document.getElementById('clear').addEventListener('click', function () {
 				document.getElementById('clear').classList.add('hidden');
-				eda.pcb_PrimitiveLine.getAllPrimitiveId('HILBERT').then(function (ids) {
-					eda.pcb_PrimitiveLine
-						.delete(ids)
-						.then(function () {
-							eda.sys_Message.showToastMessage('清除完成', 'success');
-						})
-						.catch(function (error) {
-							eda.sys_Message.showToastMessage('清除失败：' + error, 'error');
-						});
-				});
+				Promise.all([
+					eda.pcb_PrimitiveLine.getAllPrimitiveId('HILBERT'),
+					eda.pcb_PrimitiveVia ? eda.pcb_PrimitiveVia.getAllPrimitiveId('HILBERT') : Promise.resolve([]),
+				])
+					.then(function (ids) {
+						const lineIds = ids[0] || [];
+						const viaIds = ids[1] || [];
+						const jobs = [];
+						if (lineIds.length > 0) {
+							jobs.push(eda.pcb_PrimitiveLine.delete(lineIds));
+						}
+						if (viaIds.length > 0) {
+							jobs.push(eda.pcb_PrimitiveVia.delete(viaIds));
+						}
+						return Promise.all(jobs);
+					})
+					.then(function () {
+						eda.sys_Message.showToastMessage('清除完成', 'success');
+					})
+					.catch(function (error) {
+						eda.sys_Message.showToastMessage('清除失败：' + error, 'error');
+					});
 			});
 		</script>
 	</body>

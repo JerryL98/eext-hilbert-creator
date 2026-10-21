@@ -172,6 +172,16 @@
 			return out;
 		}
 
+		// 长宽比达到 2:1 时先沿长边二分，子块才会是正方形，
+		// 整体看起来才是「方方正正」的经典希尔伯特结构；否则四象限会切出长条。
+		const ratio = Math.max(w, h) / Math.min(w, h);
+		if (ratio >= 2) {
+			const bis = tryBisect(x0, y0, w, h, entry, exit);
+			if (bis) {
+				return bis;
+			}
+		}
+
 		const quad = tryQuadrants(x0, y0, w, h, entry, exit);
 		if (quad) {
 			return quad;
@@ -354,52 +364,80 @@
 		return null;
 	}
 
-	/** 选择结束角点：优先右下，其次右上、左上 */
-	function chooseExit(w, h) {
-		const candidates = [SE, NE, NW, SW];
-		for (const candidate of candidates) {
-			if (validCorners(w, h, SW, candidate)) {
-				return candidate;
+	/** 最长直线段长度，用来判断曲线是否「方正」（越大越像来回梳的条带） */
+function longestRun(path) {
+	let maxRun = 1;
+	let run = 1;
+	for (let i = 2; i < path.length; i += 1) {
+		const dx1 = path[i - 1][0] - path[i - 2][0];
+		const dy1 = path[i - 1][1] - path[i - 2][1];
+		const dx2 = path[i][0] - path[i - 1][0];
+		const dy2 = path[i][1] - path[i - 1][1];
+		if (dx1 === dx2 && dy1 === dy2) {
+			run += 1;
+			if (run > maxRun) {
+				maxRun = run;
 			}
+		} else {
+			run = 1;
 		}
-		return SW;
+	}
+	return maxRun;
+}
+
+/**
+ * 生成矩形网格上的希尔伯特曲线
+ *
+ * 终点角点有多个合法选择，不同选择会得到差异极大的形状（有的会退化成梳状长条），
+ * 这里全部试一遍，取「最长直线段最短」的那个，保证任意宽高比都尽量方正。
+ *
+ * @param options - 参数对象
+ * @param options.cols - 列数
+ * @param options.rows - 行数
+ * @param options.mode - 起始方向模式，0 ~ 3
+ * @returns 格点序列
+ */
+function buildPath(options) {
+	const cols = Math.max(1, Math.round(Number(options.cols) || 1));
+	const rows = Math.max(1, Math.round(Number(options.rows) || 1));
+	const mode = ((Math.round(Number(options.mode) || 0) % 4) + 4) % 4;
+
+	let base = null;
+	let bestScore = Infinity;
+	for (const exit of [SE, NE, NW, SW]) {
+		if (!validCorners(cols, rows, SW, exit)) {
+			continue;
+		}
+		const candidate = fill(0, 0, cols, rows, SW, exit);
+		if (!candidate) {
+			continue;
+		}
+		const score = longestRun(candidate);
+		if (score < bestScore) {
+			bestScore = score;
+			base = candidate;
+		}
+	}
+	if (!base) {
+		throw new Error('无法生成 ' + cols + 'x' + rows + ' 的曲线');
 	}
 
-	/**
-	 * 生成矩形网格上的希尔伯特曲线
-	 *
-	 * @param options - 参数对象
-	 * @param options.cols - 列数
-	 * @param options.rows - 行数
-	 * @param options.mode - 起始方向模式，0 ~ 3
-	 * @returns 格点序列
-	 */
-	function buildPath(options) {
-		const cols = Math.max(1, Math.round(Number(options.cols) || 1));
-		const rows = Math.max(1, Math.round(Number(options.rows) || 1));
-		const mode = ((Math.round(Number(options.mode) || 0) % 4) + 4) % 4;
-
-		const base = fill(0, 0, cols, rows, SW, chooseExit(cols, rows));
-		if (!base) {
-			throw new Error('无法生成 ' + cols + 'x' + rows + ' 的曲线');
+	return base.map(function (point) {
+		let x = point[0];
+		let y = point[1];
+		if (mode === 1) {
+			x = cols - 1 - x;
+		} else if (mode === 2) {
+			y = rows - 1 - y;
+		} else if (mode === 3) {
+			x = cols - 1 - x;
+			y = rows - 1 - y;
 		}
+		return [x, y];
+	});
+}
 
-		return base.map(function (point) {
-			let x = point[0];
-			let y = point[1];
-			if (mode === 1) {
-				x = cols - 1 - x;
-			} else if (mode === 2) {
-				y = rows - 1 - y;
-			} else if (mode === 3) {
-				x = cols - 1 - x;
-				y = rows - 1 - y;
-			}
-			return [x, y];
-		});
-	}
-
-	/** 按给定方式翻转一个点（用于绘制底层镜像图形） */
+/** 按给定方式翻转一个点（用于绘制底层镜像图形） */
 	function transform(x, y, mirror, box) {
 		if (!mirror || mirror === 'none' || !box) {
 			return [x, y];

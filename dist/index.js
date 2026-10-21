@@ -30,7 +30,7 @@ var edaEsbuildExportName = (() => {
   // extension.json
   var displayName = "Hilbert Creator";
   var description = "Hilbert Creator - \u5E0C\u5C14\u4F2F\u7279\u66F2\u7EBF\u751F\u6210\u5668";
-  var version = "1.5.0";
+  var version = "1.6.0";
 
   // src/index.ts
   function activate(status, arg) {
@@ -42,7 +42,7 @@ var edaEsbuildExportName = (() => {
     );
   }
   function openIframe() {
-    eda.sys_IFrame.openIFrame("/iframe/index.html", 380, 520);
+    eda.sys_IFrame.openIFrame("/iframe/index.html", 380, 700);
   }
   function openCounter1Iframe() {
     eda.sys_IFrame.openIFrame("/iframe/counter_1.html", 340, 300);
