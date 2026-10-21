@@ -2,8 +2,6 @@
 
 嘉立创EDA & EasyEDA 专业版扩展 —— 希尔伯特曲线生成器
 
-<a href="https://github.com/JerryL98/eext-hilbert-creator" target="_blank"><img src="https://img.shields.io/github/stars/JerryL98/eext-hilbert-creator" alt="GitHub Repo Stars" /></a>&nbsp;<a href="https://github.com/JerryL98/eext-hilbert-creator/issues" target="_blank"><img src="https://img.shields.io/github/issues/JerryL98/eext-hilbert-creator" alt="GitHub Issues" /></a>&nbsp;<img src="https://img.shields.io/badge/EasyEDA-%5E2.2.35-5588ff" alt="EasyEDA" />&nbsp;<a href="https://choosealicense.com/licenses/unlicense/" target="_blank"><img src="https://img.shields.io/github/license/JerryL98/eext-hilbert-creator" alt="GitHub License" /></a>
-
 > [!NOTE]
 > 本项目 fork 自 [klxf/eext-hilbert-creator](https://github.com/klxf/eext-hilbert-creator)，
 > 在原作者版本的基础上，使用 AI 辅助开发（DeepSeek Harness）做了较大改动，
@@ -26,7 +24,7 @@
 
 ## 开始使用
 
-1. 直接下载 [release/eext-hilbert-creator_v1.6.4.eext](release/eext-hilbert-creator_v1.6.4.eext)，在 **嘉立创EDA** 或 **EasyEDA** 专业版中安装；也可以拉源码后 `npm run build`，产物在 `build/dist`
+1. 直接下载 [release/eext-hilbert-creator_v1.6.5.eext](release/eext-hilbert-creator_v1.6.5.eext)，在 **嘉立创EDA** 或 **EasyEDA** 专业版中安装；也可以拉源码后 `npm run build`，产物在 `build/dist`
 
 2. 在 PCB 页面中，点击顶部菜单的 `希尔伯特` → `生成希尔伯特曲线...`，即可打开本扩展
 
@@ -56,8 +54,10 @@ npm run build   # 编译 dist/index.js 并打包 build/dist/*.eext
 - `iframe/js/main.js`：步距/网格计算、双面错开与过孔、分批绘制、电阻计算
 - `iframe/index.html`：参数面板与交互
 
+想把这些改动回馈给原项目时，[docs/pull-request.md](docs/pull-request.md) 里有完整的 PR 流程与可直接使用的描述文案。
+
 ## 来源与许可
 
 - 原项目：[klxf/eext-hilbert-creator](https://github.com/klxf/eext-hilbert-creator)（作者 Mr_Fang）
-- 本仓库：[JerryL98/eext-hilbert-creator](https://github.com/JerryL98/eext-hilbert-creator)，改进部分使用 AI 辅助开发完成
+- 改进部分使用 AI 辅助开发完成
 - 协议：原项目采用 [The Unlicense](https://choosealicense.com/licenses/unlicense/)，本项目**沿用同一协议**，同样释放到公有领域

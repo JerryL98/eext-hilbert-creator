@@ -21,8 +21,7 @@ export function about(): void {
 			' ' +
 			extensionConfig.version +
 			'\n' +
-			extensionConfig.description +
-			'基于 klxf/eext-hilbert-creator 改进（AI 辅助）\n Github: https://github.com/JerryL98/eext-hilbert-creator',
+			extensionConfig.description,
 		'关于',
 	);
 }

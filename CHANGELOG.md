@@ -1,3 +1,9 @@
+# 1.6.5
+
+移除项目内的个人信息：README 去掉与个人仓库绑定的徽章和链接，extension.json 去掉 homepage / bugs 字段
+关于对话框只显示名称、版本与简介
+补充 docs/pull-request.md：给上游提交 PR 的流程与文案
+
 # 1.6.4
 
 整理仓库并补充文档：README 增加来源说明、新增功能清单与截图
