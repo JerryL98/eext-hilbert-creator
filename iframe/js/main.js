@@ -138,24 +138,156 @@ function simplify(points) {
 }
 
 /**
- * 末端格子朝区域外的方向
+ * 末端格子最近的一条边，朝外的方向
  *
- * 只取水平或竖直，过孔才能用一段直角走线接过去；斜着拉会在孔盘旁边留下尖角，
- * 而且孔盘容易压到相邻走线。
+ * 只取水平或竖直，过孔才能用一段直角走线接过去；取最近的那条边，
+ * 引出的那一段立刻离开区域，不会顺着边沿跟别的走线并排。
  *
  * @param x - 末端 X（mil）
  * @param y - 末端 Y（mil）
- * @param cx - 区域中心 X（mil）
- * @param cy - 区域中心 Y（mil）
+ * @param maxX - 区域右边 X（mil）
+ * @param maxY - 区域上边 Y（mil）
  * @returns 单位方向 `[dx, dy]`
  */
-function outwardDirection(x, y, cx, cy) {
-	const dx = x - cx;
-	const dy = y - cy;
-	if (Math.abs(dx) >= Math.abs(dy)) {
-		return [dx >= 0 ? 1 : -1, 0];
+function edgeDirection(x, y, maxX, maxY) {
+	const left = x;
+	const right = maxX - x;
+	const bottom = y;
+	const top = maxY - y;
+	const min = Math.min(left, right, bottom, top);
+	if (min === left) {
+		return [-1, 0];
 	}
-	return [0, dy >= 0 ? 1 : -1];
+	if (min === right) {
+		return [1, 0];
+	}
+	return min === bottom ? [0, -1] : [0, 1];
+}
+
+/** 点到线段的距离 */
+function distToSegment(px, py, a, b) {
+	const vx = b[0] - a[0];
+	const vy = b[1] - a[1];
+	const wx = px - a[0];
+	const wy = py - a[1];
+	const len2 = vx * vx + vy * vy;
+	let t = len2 > 0 ? (wx * vx + wy * vy) / len2 : 0;
+	t = t < 0 ? 0 : t > 1 ? 1 : t;
+	const dx = px - (a[0] + t * vx);
+	const dy = py - (a[1] + t * vy);
+	return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * 过孔落点：沿外法线往外挪，直到孔盘对两层所有走线都留出间距
+ *
+ * 只按「孔半径 + 半线宽」从末端格子甩出去并不够：底层错开了半个步距，
+ * 它的端点和附近几条线都可能落进孔盘。这里对所有线段实测距离，
+ * 取最靠里的合法位置，孔盘既不压线又不会无谓地跑太远。
+ *
+ * @param base - 末端格子坐标 `[x, y]`
+ * @param dir - 外法线
+ * @param need - 孔心到走线中心线的最小距离（孔半径 + 半线宽 + 间距）
+ * @param polylines - 两层所有格点连线
+ * @returns `{ x, y }` 过孔坐标
+ */
+function placeVia(base, dir, need, polylines) {
+	const step = eda.sys_Unit.mmToMil(0.05);
+	const reach = need + eda.sys_Unit.mmToMil(12);
+	const farX = base[0] + dir[0] * reach;
+	const farY = base[1] + dir[1] * reach;
+	const minX = Math.min(base[0], farX) - need;
+	const maxX = Math.max(base[0], farX) + need;
+	const minY = Math.min(base[1], farY) - need;
+	const maxY = Math.max(base[1], farY) + need;
+	// 只留下法线方向上那条带子里的线段，几万段通常只剩几十段
+	const local = [];
+	for (let p = 0; p < polylines.length; p += 1) {
+		const poly = polylines[p];
+		for (let i = 1; i < poly.length; i += 1) {
+			const a = poly[i - 1];
+			const b = poly[i];
+			if (Math.max(a[0], b[0]) < minX || Math.min(a[0], b[0]) > maxX) {
+				continue;
+			}
+			if (Math.max(a[1], b[1]) < minY || Math.min(a[1], b[1]) > maxY) {
+				continue;
+			}
+			local.push(a, b);
+		}
+	}
+	let dist = need;
+	let point = { x: base[0] + dir[0] * dist, y: base[1] + dir[1] * dist };
+	// 挪过的距离单调增大，最多试探几次就会停
+	for (let guard = 0; guard < 400 && local.length > 0; guard += 1) {
+		let worst = Infinity;
+		for (let i = 0; i < local.length; i += 2) {
+			const d = distToSegment(point.x, point.y, local[i], local[i + 1]);
+			if (d < worst) {
+				worst = d;
+			}
+		}
+		if (worst >= need - 1e-6) {
+			break;
+		}
+		// 差多少挪多少，至少挪一小步，避免贴着走线反复试探
+		dist += Math.max(need - worst, step);
+		point = { x: base[0] + dir[0] * dist, y: base[1] + dir[1] * dist };
+	}
+	return point;
+}
+
+/**
+ * 单层模式的引出线
+ *
+ * 单层的两个端子本来就只隔一个步距，一起朝外引还是挤在一起，焊盘会连成一片。
+ * 所以一端直接引出，另一端先离开区域、横让一步再引出，两个焊位才算真正分开。
+ * 所有引出段都走直角。
+ *
+ * @param points - 路径点序列，原地前插/后接
+ * @param leadMil - 引出线长度（mil）
+ * @param pitch - 步距（mil）
+ */
+function leadSingle(points, leadMil, pitch) {
+	const first = points[0];
+	const lastPoint = points[points.length - 1];
+	const gapMil = eda.sys_Unit.mmToMil(0.8);
+	const dropMil = eda.sys_Unit.mmToMil(0.6);
+	// 横让的距离既要不小于引出线本身，又要够两个焊位摆开烙铁
+	const sideMil = Math.max(leadMil + gapMil + eda.sys_Unit.mmToMil(1.2), 2.5 * pitch);
+	const attach = function (atStart, pts) {
+		for (let i = 0; i < pts.length; i += 1) {
+			if (atStart) {
+				points.unshift(pts[i]);
+			} else {
+				points.push(pts[i]);
+			}
+		}
+	};
+	if (Math.abs(first[1] - lastPoint[1]) < 1e-6 && Math.abs(first[0] - lastPoint[0]) <= 2.5 * pitch) {
+		// 两端相邻（走满一圈再剪开）：右端直着引出，左端先往下让、横挪一步、再引出
+		const rightIsFirst = first[0] >= lastPoint[0];
+		const big = rightIsFirst ? first : lastPoint;
+		const small = rightIsFirst ? lastPoint : first;
+		attach(rightIsFirst, [[big[0], big[1] - leadMil]]);
+		attach(!rightIsFirst, [
+			[small[0], small[1] - dropMil],
+			[small[0] - sideMil, small[1] - dropMil],
+			[small[0] - sideMil, small[1] - dropMil - leadMil],
+		]);
+		return;
+	}
+	// 两端本来就分得开：各自沿最近的边直着引出
+	let maxX = first[0];
+	let maxY = first[1];
+	for (let i = 1; i < points.length; i += 1) {
+		maxX = Math.max(maxX, points[i][0]);
+		maxY = Math.max(maxY, points[i][1]);
+	}
+	const headDir = edgeDirection(first[0], first[1], maxX, maxY);
+	const tailDir = edgeDirection(lastPoint[0], lastPoint[1], maxX, maxY);
+	attach(false, [[lastPoint[0] + tailDir[0] * leadMil, lastPoint[1] + tailDir[1] * leadMil]]);
+	attach(true, [[first[0] + headDir[0] * leadMil, first[1] + headDir[1] * leadMil]]);
 }
 
 /**
@@ -191,7 +323,6 @@ function planCurve(options) {
 	const viaDiaMm = Math.max(0.2, Number(options.viaDiameter) || 0.6);
 	const lineWidthMm = Number(options.lineWidth) > 0 ? Number(options.lineWidth) : 0.2;
 
-	const cx = ((grid.cols - 1) * p) / 2;
 	const cy = ((grid.rows - 1) * p) / 2;
 	const last = cells[cells.length - 1];
 
@@ -200,25 +331,31 @@ function planCurve(options) {
 	let via = null;
 
 	if (staggered) {
+		const topCells = [];
+		const bottomCells = [];
 		for (let i = 0; i < cells.length; i += 1) {
-			top.push([cells[i][0] * p, cells[i][1] * p]);
+			topCells.push([cells[i][0] * p, cells[i][1] * p]);
+			// 底层整体偏移半个步距，末端正好落在顶层的空隙里
+			bottomCells.push([cells[i][0] * p + half, cells[i][1] * p + half]);
 		}
-		// 底层整体偏移半个步距，末端正好落在顶层的空隙里
-		const q = [last[0] * p + half, last[1] * p + half];
-		const clearMil = eda.sys_Unit.mmToMil(0.2);
+		for (let i = 0; i < topCells.length; i += 1) {
+			top.push(topCells[i]);
+		}
 		if (useVia) {
-			// 过孔沿边界法线挪到区域外面：孔盘边缘离最近走线还有 0.2 mm，
+			// 过孔沿最近的边挪到区域外面，一直挪到孔盘对两层所有走线都留出间距；
 			// 两层都用直角接过去，不再斜着拉一段
-			const outward = outwardDirection(last[0] * p, last[1] * p, cx, cy);
-			const r = eda.sys_Unit.mmToMil(viaDiaMm / 2 + lineWidthMm / 2) + clearMil;
-			via = { x: last[0] * p + outward[0] * r, y: last[1] * p + outward[1] * r };
+			const clearMil = eda.sys_Unit.mmToMil(0.2);
+			const outward = edgeDirection(last[0] * p, last[1] * p, (grid.cols - 1) * p, (grid.rows - 1) * p);
+			const need = eda.sys_Unit.mmToMil(viaDiaMm / 2 + lineWidthMm / 2) + clearMil;
+			via = placeVia(topCells[topCells.length - 1], outward, need, [topCells, bottomCells]);
 			top.push([via.x, via.y]);
 			bottom.push([via.x, via.y]);
 			// 顶层末端与底层末端差半个步距，用一段直角折线过渡
+			const q = bottomCells[bottomCells.length - 1];
 			bottom.push(outward[0] !== 0 ? [via.x, q[1]] : [q[0], via.y]);
 		}
-		for (let i = cells.length - 1; i >= 0; i -= 1) {
-			bottom.push([cells[i][0] * p + half, cells[i][1] * p + half]);
+		for (let i = bottomCells.length - 1; i >= 0; i -= 1) {
+			bottom.push(bottomCells[i]);
 		}
 		if (leadMil > 0) {
 			const t0 = top[0];
@@ -247,6 +384,10 @@ function planCurve(options) {
 	} else {
 		for (let i = 0; i < cells.length; i += 1) {
 			top.push([cells[i][0] * p, cells[i][1] * p]);
+		}
+		// 单层没有过孔，两个端子只隔一个步距，同样需要引出线分开
+		if (leadMil > 0) {
+			leadSingle(top, leadMil, p);
 		}
 	}
 
